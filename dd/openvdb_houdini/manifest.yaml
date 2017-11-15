@@ -47,4 +47,5 @@ Requires:
 
 Supports:
   - houdini-16.0.666
+  - houdini-16.0.705
   - houdini-16.0.763
