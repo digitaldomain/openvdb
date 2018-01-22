@@ -1,4 +1,4 @@
-# Copyright (c) 2012-2017 DreamWorks Animation LLC
+# Copyright (c) 2012-2018 DreamWorks Animation LLC
 #
 # All rights reserved. This software is distributed under the
 # Mozilla Public License 2.0 ( http://www.mozilla.org/MPL/2.0/ )
@@ -50,6 +50,7 @@
 #   install_lib         install just the OpenVDB library and its headers
 #                       into subdirectories of DESTDIR
 #   depend              recompute source file header dependencies
+#   header_test         check for missing or indirectly included headers
 #   clean               delete generated files from the local directory
 #   test                run tests
 #
@@ -61,13 +62,7 @@
 #                       (default: link against shared libraries)
 #   debug=yes           build with debugging symbols and without optimization
 #   verbose=yes         run commands (e.g., doxygen) in verbose mode
-#
-#   use_houdini_libs=yes build openvdb using the libriaries shipped
-#                        with houdini. Will append the suffix
-#                        h<Major>.<Minor> to the library if suffix=yes
-#   use_maya_libs=yes    build openvdb using the libriaries shipped
-#                        with maya. Will append the suffix
-#                        m<version> to the library if suffix=yes
+
 
 #
 # The following variables must be defined, either here or on the command line
@@ -76,126 +71,111 @@
 # Note that if you plan to build the Houdini OpenVDB tools (distributed
 # separately), you must build the OpenVDB library and the Houdini tools
 # against compatible versions of the Boost, OpenEXR and TBB libraries.
-# Fortunately, all three are included in the Houdini HDK, so the relevant
+# Until Houdini 16.5, all three were included in the HDK, so the relevant
 # variables below point by default to the HDK library and header directories:
 # $(HDSO) and $(HT)/include, respectively.  (Source the houdini_setup script
-# to set those two environment variables.)
+# to set those two environment variables.)  Beginning with Houdini 16.5,
+# you must provide your own distribution of Boost.
 #
 # To build the OpenVDB Python module, you will need local distributions of
-# Python, Boost.Python, and optionally NumPy.  As of Houdini 12.5, the HDK
-# includes Python 2.x as well as the Boost.Python headers.  Unfortunately,
-# it does not include the libboost_python library, nor does it include NumPy,
-# so both Boost.Python and NumPy have to be built separately.
-# Point the variables $(BOOST_PYTHON_LIB_DIR), $(BOOST_PYTHON_LIB) and
-# $(NUMPY_INCL_DIR) below to your local distributions of those libraries.
+# Python, Boost.Python, and optionally NumPy.  The Houdini HDK includes
+# Python 2.x, but not the libboost_python library or NumPy or, as of
+# Houdini 16.5, the Boost.Python headers, so both Boost.Python and NumPy
+# have to be built separately.  Point the variables $(BOOST_PYTHON_LIB_DIR),
+# $(BOOST_PYTHON_LIB) and $(NUMPY_INCL_DIR) below to your local distributions
+# of those libraries.
 #
 
-ifeq ($(use_houdini_libs),yes)
-  -include houdini.mk
-endif
-
-ifeq ($(use_maya_libs),yes)
-  -include maya.mk
-endif
-
-# Add suffix 
-OPENVDB_SUFFIX ?=
-
 # The directory into which to install libraries, executables and header files
-DESTDIR := $(INSTALL_BASE)
+DESTDIR := /tmp/OpenVDB
 
 # The directory into which to install libraries (e.g., for Linux multiarch support)
 DESTDIR_LIB_DIR := $(DESTDIR)/lib
 
 # The parent directory of the boost/ header directory
-BOOST_INCL_DIR ?= $(PACKAGES_DIR)/boost/$(BOOST_VERSION)/include
+BOOST_INCL_DIR := $(HT)/include
 # The directory containing libboost_iostreams, libboost_system, etc.
-BOOST_LIB_DIR ?= $(PACKAGES_DIR)/boost/$(BOOST_VERSION)/lib
+BOOST_LIB_DIR := $(HDSO)
 BOOST_LIB := -lboost_iostreams -lboost_system
 BOOST_THREAD_LIB := -lboost_thread
 
 # The parent directory of the OpenEXR/ header directory
-EXR_INCL_DIR ?= $(PACKAGES_DIR)/openexr/$(EXR_VERSION)/include
+EXR_INCL_DIR := $(HT)/include
 # The directory containing IlmImf
-EXR_LIB_DIR ?= $(PACKAGES_DIR)/openexr/$(EXR_VERSION)/lib
+EXR_LIB_DIR := $(HDSO)
 EXR_LIB := -lIlmImf
 
-#EXR_LIB := -lIlmImf -lIlmThread -lIex -lImath
 # The parent directory of the OpenEXR/ header directory (which contains half.h)
-ILMBASE_INCL_DIR ?= $(PACKAGES_DIR)/ilmbase/$(EXR_VERSION)/include
+ILMBASE_INCL_DIR := $(EXR_INCL_DIR)
 # The directory containing libIlmThread, libIlmThread, libHalf etc.
-ILMBASE_LIB_DIR ?= $(PACKAGES_DIR)/ilmbase/$(EXR_VERSION)/lib
+ILMBASE_LIB_DIR := $(EXR_LIB_DIR)
 ILMBASE_LIB := -lIlmThread -lIex -lImath
-
 HALF_LIB := -lHalf
 
 # The parent directory of the tbb/ header directory
-TBB_INCL_DIR ?= $(PACKAGES_DIR)/tbb/$(TBB_VERSION)/include
+TBB_INCL_DIR := $(HT)/include
 # The directory containing libtbb
-TBB_LIB_DIR ?= $(PACKAGES_DIR)/tbb/$(TBB_VERSION)/lib
+TBB_LIB_DIR := $(HDSO)
 TBB_LIB := -ltbb
 
 # The parent directory of the blosc.h header
-# (leave blank if Blosc is unavailable) 
-BLOSC_INCL_DIR ?= $(PACKAGES_DIR)/blosc/$(BLOSC_VERSION)/include 
+# (leave blank if Blosc is unavailable)
+BLOSC_INCL_DIR := $(HT)/include
 # The directory containing libblosc
-BLOSC_LIB_DIR ?= $(PACKAGES_DIR)/blosc/$(BLOSC_VERSION)/lib 
+BLOSC_LIB_DIR := $(HDSO)
 BLOSC_LIB := -lblosc
 
 # A scalable, concurrent malloc replacement library
 # such as jemalloc (included in the Houdini HDK) or TBB malloc
 # (leave blank if unavailable)
-#CONCURRENT_MALLOC_LIB := -ljemalloc
-CONCURRENT_MALLOC_LIB := -ltbbmalloc_proxy -ltbbmalloc
+CONCURRENT_MALLOC_LIB := -ljemalloc
+#CONCURRENT_MALLOC_LIB := -ltbbmalloc_proxy -ltbbmalloc
 # The directory containing the malloc replacement library
-CONCURRENT_MALLOC_LIB_DIR := $(TBB_LIB_DIR)
+CONCURRENT_MALLOC_LIB_DIR := $(HDSO)
 
 # The parent directory of the cppunit/ header directory
 # (leave blank if CppUnit is unavailable)
-CPPUNIT_INCL_DIR ?= $(PACKAGES_DIR)/cppunit/$(CPPUNIT_VERSION)/include
+CPPUNIT_INCL_DIR := /rel/map/generic-2013.22/sys_include
 # The directory containing libcppunit
-CPPUNIT_LIB_DIR ?= $(PACKAGES_DIR)/cppunit/$(CPPUNIT_VERSION)/lib
+CPPUNIT_LIB_DIR := /rel/depot/third_party_build/cppunit/1.10.2-7/opt-ws5-x86_64-gccWS5_64/lib
 CPPUNIT_LIB := -lcppunit
 
 # The parent directory of the log4cplus/ header directory
 # (leave blank if log4cplus is unavailable)
-LOG4CPLUS_INCL_DIR ?= 
+LOG4CPLUS_INCL_DIR := /rel/folio/log4cplus/log4cplus-1.1.2-latest/sys_include
 # The directory containing liblog4cplus
-LOG4CPLUS_LIB_DIR ?= 
-LOG4CPLUS_LIB := 
+LOG4CPLUS_LIB_DIR := /rel/folio/log4cplus/log4cplus-1.1.2-latest/library/c++11
+LOG4CPLUS_LIB := -llog4cplus
 
 # The directory containing glfw.h
 # (leave blank if GLFW is unavailable)
-GLFW_INCL_DIR ?= $(PACKAGES_DIR)/glfw/$(GLFW_VERSION)/include
+GLFW_INCL_DIR := /rel/third_party/glfw/glfw-3.0.1/include
 # The directory containing libglfw
-GLFW_LIB_DIR ?= $(PACKAGES_DIR)/glfw/$(GLFW_VERSION)/lib
-
+GLFW_LIB_DIR := /rel/third_party/glfw/glfw-3.0.1/lib
 GLFW_LIB := -lglfw
 # The major version number of the GLFW library
 # (header filenames changed between GLFW 2 and 3, so this must be specified explicitly)
-GLFW_MAJOR_VERSION := $(firstword $(subst ., ,$(GLFW_VERSION)))
+GLFW_MAJOR_VERSION := 3
 
 # The version of Python for which to build the OpenVDB module
 # (leave blank if Python is unavailable)
 PYTHON_VERSION := 2.7
 # The directory containing Python.h
-PYTHON_INCL_DIR ?= $(PACKAGES_DIR)/python/$(PY_VERSION)/include/python$(PYTHON_VERSION)/
+PYTHON_INCL_DIR := $(HFS)/python/include/python$(PYTHON_VERSION)
 # The directory containing pyconfig.h
-PYCONFIG_INCL_DIR ?= $(PYTHON_INCL_DIR)
+PYCONFIG_INCL_DIR := $(PYTHON_INCL_DIR)
 # The directory containing libpython
-PYTHON_LIB_DIR ?= $(PACKAGES_DIR)/python/$(PY_VERSION)/lib/
+PYTHON_LIB_DIR := $(HFS)/python/lib
 PYTHON_LIB := -lpython$(PYTHON_VERSION)
 # The directory containing libboost_python
-
-BOOST_PYTHON_LIB_DIR ?= $(PACKAGES_DIR)boost/$(BOOST_VERSION)/lib/
-BOOST_PYTHON_LIB := -lboost_python
+BOOST_PYTHON_LIB_DIR := /rel/config/studio/baseline/boost/1.55.0.0/gcc-4.8.1.0/python-2.7.10.0/ext/lib/
+BOOST_PYTHON_LIB := -lboost_python-mt
 # The directory containing arrayobject.h
 # (leave blank if NumPy is unavailable)
-NUMPY_INCL_DIR ?=
-
+NUMPY_INCL_DIR := /rel/lang/python/2.7.9-1/lib/python2.7/site-packages/numpy/core/include/numpy/
 # The Epydoc executable
 # (leave blank if Epydoc is unavailable)
-EPYDOC ?= 
+EPYDOC := /rel/map/generic_default-2014.24.237/bin/epydoc
 # Set PYTHON_WRAP_ALL_GRID_TYPES to "yes" to specify that the Python module
 # should expose (almost) all of the grid types defined in openvdb.h
 # Otherwise, only FloatGrid, BoolGrid and Vec3SGrid will be exposed
@@ -255,6 +235,11 @@ ifneq (,$(and $(BLOSC_LIB_DIR),$(BLOSC_INCL_DIR),$(BLOSC_LIB)))
     has_blosc := yes
 endif
 
+has_cppunit := no
+ifneq (,$(and $(CPPUNIT_INCL_DIR),$(CPPUNIT_LIB_DIR),$(CPPUNIT_LIB)))
+    has_cppunit := yes
+endif
+
 has_glfw := no
 ifneq (,$(and $(GLFW_LIB_DIR),$(GLFW_INCL_DIR),$(GLFW_LIB)))
     has_glfw := yes
@@ -271,7 +256,7 @@ ifneq (,$(and $(PYTHON_VERSION),$(PYTHON_LIB_DIR),$(PYTHON_INCL_DIR), \
     has_python := yes
 endif
 
-INCLDIRS := -I . -I .. -isystem $(BOOST_INCL_DIR) -isystem $(ILMBASE_INCL_DIR) -isystem $(TBB_INCL_DIR) -I $(ILMBASE_INCL_DIR)/OpenEXR
+INCLDIRS := -I . -I .. -isystem $(BOOST_INCL_DIR) -isystem $(ILMBASE_INCL_DIR) -isystem $(TBB_INCL_DIR)
 ifeq (yes,$(has_blosc))
     INCLDIRS += -isystem $(BLOSC_INCL_DIR)
 endif
@@ -404,8 +389,6 @@ INCLUDE_NAMES := \
     tools/Mask.h \
     tools/MeshToVolume.h \
     tools/Morphology.h \
-    tools/Morphology26N.h \
-    tools/LeafMorphology.h \
     tools/MultiResGrid.h \
     tools/ParticleAtlas.h \
     tools/ParticlesToLevelSet.h \
@@ -679,7 +662,7 @@ LIB_PATCH_VERSION=$(shell grep 'define OPENVDB_LIBRARY_PATCH_VERSION_NUMBER ' \
 LIB_VERSION=$(LIB_MAJOR_VERSION).$(LIB_MINOR_VERSION).$(LIB_PATCH_VERSION)
 SO_VERSION=$(LIB_MAJOR_VERSION).$(LIB_MINOR_VERSION)
 
-LIBOPENVDB_NAME=libopenvdb$(if $(OPENVDB_SUFFIX),_$(OPENVDB_SUFFIX))
+LIBOPENVDB_NAME=libopenvdb
 LIBOPENVDB_STATIC := $(LIBOPENVDB_NAME).a
 ifndef MBSD
 LIBOPENVDB_SHARED_NAME := $(LIBOPENVDB_NAME).so
@@ -694,7 +677,7 @@ LIBOPENVDB_SONAME_FLAGS := -Wl,-install_name,$(DESTDIR_LIB_DIR)/$(LIBOPENVDB_SON
 endif
 
 # TODO: libopenvdb_viewer is currently built into vdb_view and is not installed separately.
-LIBVIEWER_NAME=libopenvdb_viewer$(if $(OPENVDB_SUFFIX),_$(OPENVDB_SUFFIX))
+LIBVIEWER_NAME=libopenvdb_viewer
 LIBVIEWER_STATIC := $(LIBVIEWER_NAME).a
 ifndef MBSD
 LIBVIEWER_SHARED_NAME := $(LIBVIEWER_NAME).so
@@ -708,7 +691,7 @@ LIBVIEWER_SONAME := $(LIBVIEWER_NAME).$(SO_VERSION).dylib
 LIBVIEWER_SONAME_FLAGS := -Wl,-install_name,$(DESTDIR_LIB_DIR)/$(LIBVIEWER_SONAME)
 endif
 
-PYTHON_MODULE_NAME=pyopenvdb$(if $(OPENVDB_SUFFIX),_$(OPENVDB_SUFFIX))
+PYTHON_MODULE_NAME=pyopenvdb
 PYTHON_MODULE := $(PYTHON_MODULE_NAME).so
 PYTHON_SONAME := $(PYTHON_MODULE_NAME).so.$(SO_VERSION)
 ifndef MBSD
@@ -745,7 +728,7 @@ ALL_PRODUCTS := \
 
 .SUFFIXES: .o .cc
 
-.PHONY: all clean depend doc install lib pdfdoc pydoc pytest python test viewerlib
+.PHONY: all clean depend doc header_test install lib pdfdoc pydoc pytest python test viewerlib
 
 .cc.o:
 	@echo "Building $@ because of $(call list_deps)"
@@ -951,12 +934,12 @@ install: install_lib python vdb_lod vdb_print vdb_render vdb_view doc pydoc
 	@#
 	if [ -f $(PYTHON_MODULE) ]; \
 	then \
-	    installdir=$(DESTDIR)/python/include/; \
+	    installdir=$(DESTDIR)/python/include/python$(PYTHON_VERSION); \
 	    mkdir -p $${installdir}; \
 	    echo "Created $${installdir}"; \
 	    cp -f $(PYTHON_PUBLIC_INCLUDE_NAMES) $${installdir}/; \
 	    echo "Copied Python header files to $${installdir}"; \
-	    installdir=$(DESTDIR)/python/lib/$(PYTHON_VERSION); \
+	    installdir=$(DESTDIR)/python/lib/python$(PYTHON_VERSION); \
 	    mkdir -p $${installdir}; \
 	    echo "Created $${installdir}"; \
 	    cp -f $(PYTHON_MODULE) $${installdir}/; \
@@ -1009,6 +992,27 @@ $(DEPEND): $(ALL_INCLUDE_FILES) $(ALL_SRC_FILES) openvdb_viewer
 
 depend: $(DEPEND)
 
+# Compile an implicit translation unit for each header to identify any indirect includes
+HEADER_TEST_CXXFLAGS := $(CXXFLAGS)
+HEADER_TEST_FILES := $(addprefix header_test-,$(INCLUDE_NAMES) $(CMD_INCLUDE_NAMES))
+ifeq (yes,$(has_cppunit))
+    HEADER_TEST_FILES += $(addprefix header_test-,$(UNITTEST_INCLUDE_NAMES))
+    HEADER_TEST_CXXFLAGS += -isystem $(CPPUNIT_INCL_DIR)
+endif
+ifeq (yes,$(has_glfw))
+    HEADER_TEST_FILES += $(addprefix header_test-,$(LIBVIEWER_INCLUDE_NAMES))
+    HEADER_TEST_CXXFLAGS += -isystem $(GLFW_INCL_DIR) -DGL_GLEXT_PROTOTYPES=1
+endif
+ifeq (yes,$(has_python))
+    HEADER_TEST_FILES += $(addprefix header_test-,$(PYTHON_INCLUDE_NAMES))
+    HEADER_TEST_CXXFLAGS += $(PYCXXFLAGS)
+endif
+$(HEADER_TEST_FILES): header_test-%:
+	echo "#include \"$*\"" | $(CXX) -c -x c++ $(HEADER_TEST_CXXFLAGS) -fPIC -o /dev/null -
+echo_header_test:
+	@echo "Checking for missing or indirectly included headers"
+header_test: echo_header_test $(HEADER_TEST_FILES)
+
 clean:
 	$(RM) $(OBJ_NAMES) $(ALL_PRODUCTS) $(DEPEND)
 	$(RM) $(LIBOPENVDB_STATIC)
@@ -1022,6 +1026,6 @@ ifneq (,$(strip $(wildcard $(DEPEND))))
     include $(DEPEND)
 endif
 
-# Copyright (c) 2012-2017 DreamWorks Animation LLC
+# Copyright (c) 2012-2018 DreamWorks Animation LLC
 # All rights reserved. This software is distributed under the
 # Mozilla Public License 2.0 ( http://www.mozilla.org/MPL/2.0/ )

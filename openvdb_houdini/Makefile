@@ -1,4 +1,4 @@
-# Copyright (c) 2012-2017 DreamWorks Animation LLC
+# Copyright (c) 2012-2018 DreamWorks Animation LLC
 #
 # All rights reserved. This software is distributed under the
 # Mozilla Public License 2.0 ( http://www.mozilla.org/MPL/2.0/ )
@@ -42,6 +42,7 @@
 #                       and the SOPs into HOUDINI_DESTDIR
 #   clean               delete generated files from the local directory
 #   depend              recompute source file header dependencies
+#   header_test         check for missing or indirectly included headers
 #
 # Options:
 #   abi=N               build for compatibility with version N of the
@@ -60,44 +61,31 @@
 #
 # Note that the OpenVDB library and these Houdini tools must be built
 # against compatible versions of the Boost, OpenEXR and TBB libraries.
-# Fortunately, all three are included in the Houdini HDK, so the relevant
+# Until Houdini 16.5, all three were included in the HDK, so the relevant
 # variables below point by default to the HDK library and header directories:
 # $(HDSO) and $(HT)/include, respectively.  (Source the houdini_setup script
-# to set those two environment variables.)
+# to set those two environment variables.)  Beginning with Houdini 16.5,
+# you must provide your own distribution of Boost.
 #
 
 ifeq (,$(HFS))
 $(warning Warning: $$(HFS) is not set; did you source houdini_setup?)
 endif
-# if use_houdini_libs=yes and suffix=yes add use suffix
-# h<Major>.<Minor> for the openvdb library. For example for houdini
-# 14.0.xxx it will look for libopenvdb_h14.0.so
-ifneq ($(and $(filter yes, $(use_houdini_libs)),$(filter yes, $(suffix))), )
-OPENVDB_SUFFIX ?= h$(HOUDINI_MAJOR_RELEASE).$(HOUDINI_MINOR_RELEASE)
-endif
 
-# ABI version for the library
-# H13 is incompatible with abi=3 
-# H14 is incompatible with abi=2
-abi ?= 3
-
-# Check if houdini version is greater than or equal to 15
-# Since cent6 gcc version is too old to build 15.
-include ../if_houdini_ge_15.mk
 
 # The directory into which to install libraries and header files
 # (it's recommended that this match the DESTDIR in the OpenVDB
 # library makefile)
-DESTDIR := $(INSTALL_BASE)/houdini/$(HOUDINI_VERSION)
+DESTDIR := /tmp/OpenVDB
 
 # The directory into which to install libraries (e.g., for Linux multiarch support)
 DESTDIR_LIB_DIR := $(DESTDIR)/lib
 
 # The directory into which to install Houdini SOPs
-HOUDINI_DESTDIR := $(DESTDIR)/dso
+HOUDINI_DESTDIR := $(HIH)/dso
 
 # The parent directory of the openvdb/ header directory
-OPENVDB_INCL_DIR := $(INSTALL_BASE)/include
+OPENVDB_INCL_DIR := $(DESTDIR)/include
 # The directory containing libopenvdb
 OPENVDB_LIB_DIR := $(DESTDIR_LIB_DIR)
 OPENVDB_LIB := -lopenvdb
@@ -177,7 +165,6 @@ ifeq (yes,$(strip $(debug)))
     HCUSTOM_FLAGS += -g
 else
     OPTIMIZE := -O3 -DNDEBUG
-    HCUSTOM_EXTRA_CFLAGS += -DNDEBUG
 endif
 
 ifeq (yes,$(strip $(verbose)))
@@ -223,13 +210,13 @@ ifneq (,$(strip $(wildcard $(HOUDINI_INCL_DIR))))
 endif
 
 LIBS := \
-    -ldl -lm -lz -lHoudiniAPPS3 \
+    -ldl -lm -lz \
     -L$(ILMBASE_LIB_DIR) $(HALF_LIB) \
     -L$(TBB_LIB_DIR) $(TBB_LIB) \
     -L$(BOOST_LIB_DIR) $(BOOST_LIB) \
 #
 LIBS_RPATH := \
-    -ldl -lm -lz -lHoudiniAPPS3 \
+    -ldl -lm -lz \
     -Wl,-rpath,$(ILMBASE_LIB_DIR) -L$(ILMBASE_LIB_DIR) $(HALF_LIB) \
     -Wl,-rpath,$(TBB_LIB_DIR) -L$(TBB_LIB_DIR) $(TBB_LIB) \
     -Wl,-rpath,$(BOOST_LIB_DIR) -L$(BOOST_LIB_DIR) $(BOOST_LIB) \
@@ -241,13 +228,6 @@ endif
 ifdef LINUX
     LIBS += -lrt
     LIBS_RPATH += -lrt
-endif
-
-ifdef using_newer_gcc
-    CXXFLAGS += -O3 -DNDEBUG
-    HCUSTOM_EXTRA_CFLAGS += -std=c++11 -D__GXX_EXPERIMENTAL_CXX0X__ 
-    HCUSTOM_EXTRA_CFLAGS += -O3 -DNDEBUG
-    HOUDINI_CC := $(CXX)
 endif
 
 LIBHOUDINI_INCLUDE_NAMES := \
@@ -262,6 +242,7 @@ LIBHOUDINI_INCLUDE_NAMES := \
     houdini/ParmFactory.h \
     houdini/PointUtils.h \
     houdini/SOP_NodeVDB.h \
+    houdini/SOP_VDBVerbUtils.h \
     houdini/UT_VDBTools.h \
     houdini/UT_VDBUtils.h \
     houdini/Utils.h \
@@ -416,7 +397,7 @@ ALL_TARGETS := \
 
 .SUFFIXES: .o .cc
 
-.PHONY: all clean depend houdinisops mantradsos houdinilib install_lib install
+.PHONY: all clean depend header_test houdinisops mantradsos houdinilib install_lib install
 
 .cc.o:
 	@echo "Building $@ because of $(call list_deps)"
@@ -557,6 +538,15 @@ $(DEPEND): $(ALL_INCLUDE_FILES) $(ALL_SRC_FILES)
 
 depend: $(DEPEND)
 
+# Compile an implicit translation unit for each header to identify any indirect includes
+HEADER_TEST_FILES := $(addprefix header_test-,$(LIBHOUDINI_INCLUDE_NAMES))
+$(HEADER_TEST_FILES): header_test-%: openvdb_houdini houdini_utils
+	echo "#include \"$*\"" | $(CXX) -c -x c++ $(CXXFLAGS) $(HOUDINI_CXXFLAGS) \
+	    -isystem $(HOUDINI_INCL_DIR) -fPIC -o /dev/null -
+echo_header_test:
+	@echo "Checking for missing or indirectly included headers"
+header_test: echo_header_test $(HEADER_TEST_FILES)
+
 clean:
 	$(RM) $(ALL_TARGETS) $(DEPEND)
 	$(RM) $(LIBHOUDINI_STATIC)
@@ -572,6 +562,6 @@ ifneq (,$(strip $(wildcard $(DEPEND))))
     include $(DEPEND)
 endif
 
-# Copyright (c) 2012-2017 DreamWorks Animation LLC
+# Copyright (c) 2012-2018 DreamWorks Animation LLC
 # All rights reserved. This software is distributed under the
 # Mozilla Public License 2.0 ( http://www.mozilla.org/MPL/2.0/ )
