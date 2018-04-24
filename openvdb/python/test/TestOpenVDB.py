@@ -1,5 +1,5 @@
 #!/usr/local/bin/python
-# Copyright (c) 2012-2017 DreamWorks Animation LLC
+# Copyright (c) 2012-2018 DreamWorks Animation LLC
 #
 # All rights reserved. This software is distributed under the
 # Mozilla Public License 2.0 ( http://www.mozilla.org/MPL/2.0/ )
@@ -36,12 +36,12 @@ import os, os.path
 import sys
 import unittest
 try:
-    import pyopenvdb as openvdb
-except ImportError:
     import studioenv
     from studio.ani import Ani
     from studio import logging
     from studio import openvdb
+except ImportError:
+    import pyopenvdb as openvdb
 
 
 def valueFactory(zeroValue, elemValue):
@@ -165,7 +165,7 @@ class TestOpenVDB(unittest.TestCase):
 
         self.assertEqual(grid.metadata, {})
 
-        meta = { 'name': 'test', 'saveFloatAsHalf': True, 'xyz': (-1, 0, 1) }
+        meta = dict(name='test', saveFloatAsHalf=True, xyz=(-1, 0, 1), intval=42, floatval=1.25)
         grid.metadata = meta
         self.assertEqual(grid.metadata, meta)
 
@@ -178,10 +178,12 @@ class TestOpenVDB(unittest.TestCase):
         for name in meta:
             self.assertTrue(name in grid)
             self.assertEqual(grid[name], meta[name])
+            self.assertEqual(type(grid[name]), type(meta[name]))
 
         for name in grid:
             self.assertTrue(name in grid)
             self.assertEqual(grid[name], meta[name])
+            self.assertEqual(type(grid[name]), type(meta[name]))
 
         self.assertTrue('xyz' in grid)
         del grid['xyz']
@@ -793,6 +795,6 @@ if __name__ == '__main__':
     unittest.main(argv=args)
 
 
-# Copyright (c) 2012-2017 DreamWorks Animation LLC
+# Copyright (c) 2012-2018 DreamWorks Animation LLC
 # All rights reserved. This software is distributed under the
 # Mozilla Public License 2.0 ( http://www.mozilla.org/MPL/2.0/ )

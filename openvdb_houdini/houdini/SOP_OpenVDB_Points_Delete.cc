@@ -1,6 +1,6 @@
 ///////////////////////////////////////////////////////////////////////////
 //
-// Copyright (c) 2012-2017 DreamWorks Animation LLC
+// Copyright (c) 2012-2018 DreamWorks Animation LLC
 //
 // All rights reserved. This software is distributed under the
 // Mozilla Public License 2.0 ( http://www.mozilla.org/MPL/2.0/ )
@@ -44,6 +44,18 @@
 #include <houdini_utils/geometry.h>
 #include <houdini_utils/ParmFactory.h>
 
+#include <algorithm>
+#include <stdexcept>
+#include <string>
+#include <vector>
+
+#if UT_MAJOR_VERSION_INT >= 16
+#define VDB_COMPILABLE_SOP 1
+#else
+#define VDB_COMPILABLE_SOP 0
+#endif
+
+
 using namespace openvdb;
 using namespace openvdb::points;
 using namespace openvdb::math;
@@ -63,11 +75,15 @@ public:
 
     static OP_Node* factory(OP_Network*, const char* name, OP_Operator*);
 
+#if VDB_COMPILABLE_SOP
+    class Cache: public SOP_VDBCacheOptions { OP_ERROR cookVDBSop(OP_Context&) override; };
+#else
 protected:
-    OP_ERROR cookMySop(OP_Context&) override;
+    OP_ERROR cookVDBSop(OP_Context&) override;
+#endif
 
-private:
-    hvdb::Interrupter mBoss;
+protected:
+    bool updateParmsFlags() override;
 }; // class SOP_OpenVDB_Points_Delete
 
 
@@ -94,8 +110,12 @@ newSopOperator(OP_OperatorTable* table)
 
     parms.add(hutil::ParmFactory(PRM_TOGGLE, "invert", "Invert")
         .setDefault(PRMzeroDefaults)
-        .setHelpText("Invert point deletion so that points not belonging to any of the \
-            groups will be deleted."));
+        .setHelpText("Invert point deletion so that points not belonging to any of the "
+            "groups will be deleted."));
+    parms.add(hutil::ParmFactory(PRM_TOGGLE, "dropgroups", "Drop Points Groups")
+        .setDefault(PRMoneDefaults)
+        .setHelpText("Drop the VDB points groups that were used for deletion. This option is "
+            "ignored if \"invert\" is enabled."));
 
     //////////
     // Register this operator.
@@ -103,6 +123,9 @@ newSopOperator(OP_OperatorTable* table)
     hvdb::OpenVDBOpFactory("OpenVDB Points Delete",
         SOP_OpenVDB_Points_Delete::factory, parms, *table)
         .addInput("VDB Points")
+#if VDB_COMPILABLE_SOP
+        .setVerb(SOP_NodeVerb::COOK_INPLACE, []() { return new SOP_OpenVDB_Points_Delete::Cache; })
+#endif
         .setDocumentation("\
 #icon: COMMON/openvdb\n\
 #tags: vdb\n\
@@ -126,6 +149,15 @@ See [openvdb.org|http://www.openvdb.org/download/] for source code\n\
 and usage examples.\n");
 }
 
+bool
+SOP_OpenVDB_Points_Delete::updateParmsFlags()
+{
+    const bool invert = evalInt("invert", 0, 0) != 0;
+
+    return enableParm("dropgroups", !invert);
+}
+
+
 ////////////////////////////////////////
 
 
@@ -148,17 +180,16 @@ SOP_OpenVDB_Points_Delete::SOP_OpenVDB_Points_Delete(OP_Network* net,
 
 
 OP_ERROR
-SOP_OpenVDB_Points_Delete::cookMySop(OP_Context& context)
+VDB_NODE_OR_CACHE(VDB_COMPILABLE_SOP, SOP_OpenVDB_Points_Delete)::cookVDBSop(OP_Context& context)
 {
     try {
+#if !VDB_COMPILABLE_SOP
         hutil::ScopedInputLock lock(*this, context);
-        // This does a shallow copy of VDB-grids and deep copy of native Houdini primitives.
+        lock.markInputUnlocked(0);
         if (duplicateSourceStealable(0, context) >= UT_ERROR_ABORT) return error();
+#endif
 
-        UT_String groupStr;
-        evalString(groupStr, "vdbpointsgroups", 0, context.getTime());
-
-        const std::string groups(groupStr.toStdString());
+        const std::string groups = evalStdString("vdbpointsgroups", context.getTime());
 
         // early exit if the VDB points group field is empty
         if (groups.empty()) return error();
@@ -166,15 +197,11 @@ SOP_OpenVDB_Points_Delete::cookMySop(OP_Context& context)
         UT_AutoInterrupt progress("Processing points group deletion");
 
         const bool invert = evalInt("invert", 0, context.getTime());
+        const bool drop = evalInt("dropgroups", 0, context.getTime());
 
         // select Houdini primitive groups we wish to use
-        UT_String houdiniPrimGroups;
-        evalString(houdiniPrimGroups, "group", 0, context.getTime());
-
-        const GA_PrimitiveGroup *group =
-            matchGroup(*gdp, houdiniPrimGroups.toStdString());
-
-        hvdb::VdbPrimIterator vdbIt(gdp, group);
+        hvdb::VdbPrimIterator vdbIt(gdp,
+            matchGroup(*gdp, evalStdString("group", context.getTime())));
 
         for (; vdbIt; ++vdbIt) {
             if (progress.wasInterrupted()) {
@@ -186,11 +213,11 @@ SOP_OpenVDB_Points_Delete::cookMySop(OP_Context& context)
                     openvdb::gridConstPtrCast<PointDataGrid>(vdbPrim->getConstGridPtr());
 
             // early exit if the grid is of the wrong type
-            if (!inputGrid)    continue;
+            if (!inputGrid) continue;
 
             // early exit if the tree is empty
             auto leafIter = inputGrid->tree().cbeginLeaf();
-            if (!leafIter)    continue;
+            if (!leafIter) continue;
 
             // extract names of all selected VDB groups
 
@@ -207,15 +234,15 @@ SOP_OpenVDB_Points_Delete::cookMySop(OP_Context& context)
 
             const AttributeSet::Descriptor& descriptor = leafIter->attributeSet().descriptor();
             const bool hasPointsToDrop = std::any_of(pointGroups.begin(), pointGroups.end(),
-                [&descriptor](const std::string& grp) -> bool { return descriptor.hasGroup(grp); });
+                [&descriptor](const std::string& group) { return descriptor.hasGroup(group); });
 
-            if (!hasPointsToDrop)    continue;
+            if (!hasPointsToDrop) continue;
 
             // deep copy the VDB tree if it is not already unique
             vdbPrim->makeGridUnique();
 
             PointDataGrid& outputGrid = UTvdbGridCast<PointDataGrid>(vdbPrim->getGrid());
-            deleteFromGroups(outputGrid.tree(), pointGroups, invert);
+            deleteFromGroups(outputGrid.tree(), pointGroups, invert, drop);
         }
 
     } catch (const std::exception& e) {
@@ -224,6 +251,6 @@ SOP_OpenVDB_Points_Delete::cookMySop(OP_Context& context)
     return error();
 }
 
-// Copyright (c) 2012-2017 DreamWorks Animation LLC
+// Copyright (c) 2012-2018 DreamWorks Animation LLC
 // All rights reserved. This software is distributed under the
 // Mozilla Public License 2.0 ( http://www.mozilla.org/MPL/2.0/ )
